@@ -161,24 +161,29 @@ function renderProjects(projects) {
 }
 
 async function createNewProject() {
-  const name = prompt('Project Name:')
+  const name = await promptDialog('New Project', 'Enter project name')
   if (!name) return
   
-  const description = prompt('Project Description (optional):')
+  const description = await promptTextarea('Project Description', 'Enter project description (optional)')
   
   try {
+    showLoading('Creating project...')
+    
     const response = await axios.post(`${API_BASE}/projects`, {
       name,
       description: description || ''
     })
     
+    hideLoading()
+    
     if (response.data.success) {
-      showSuccess('Project created!')
+      showSuccess('Project created successfully!')
       loadProjects()
       loadStats()
     }
   } catch (error) {
     console.error('Create project error:', error)
+    hideLoading()
     showError('Failed to create project')
   }
 }
@@ -329,19 +334,25 @@ async function createNewSession() {
   const projectId = filterSelect?.value
   
   if (!projectId) {
-    alert('Please select a project first!')
+    showWarning('Please select a project first!')
     return
   }
   
-  const objectives = prompt('Session Objectives (optional):')
-  const accountName = prompt('Account Name (optional):', 'default')
+  const objectives = await promptTextarea('Session Objectives', 'Enter session objectives (optional)')
+  const accountName = await promptDialog('Account Name', 'Enter account name (optional)', 'default')
+  
+  if (objectives === null) return
   
   try {
+    showLoading('Creating new session...')
+    
     const response = await axios.post(`${API_BASE}/sessions/create`, {
       project_id: projectId,
       account_name: accountName || 'default',
       objectives: objectives || ''
     })
+    
+    hideLoading()
     
     if (response.data.success) {
       showSuccess(response.data.data.message)
@@ -349,12 +360,13 @@ async function createNewSession() {
       loadStats()
       
       if (response.data.data.previous_handoff) {
-        alert(`Previous handoff loaded! Check console for details.`)
+        showInfo('Previous handoff loaded! Check console for details.')
         console.log('Previous Handoff:', response.data.data.previous_handoff)
       }
     }
   } catch (error) {
     console.error('Create session error:', error)
+    hideLoading()
     showError('Failed to create session')
   }
 }
@@ -387,15 +399,18 @@ async function generateAIHandoff(e) {
   const useAI = document.getElementById('handoff-use-ai').checked
   
   if (!projectId || !context) {
-    alert('Please select project and provide context!')
+    showWarning('Please select project and provide context!')
     return
   }
   
   // Get or prompt for HF token
   if (useAI && !huggingFaceToken) {
-    huggingFaceToken = prompt('Enter your Hugging Face API token:')
+    huggingFaceToken = await promptDialog(
+      'Hugging Face Token Required', 
+      'Enter your Hugging Face API token'
+    )
     if (!huggingFaceToken) {
-      alert('AI mode requires Hugging Face token!')
+      showWarning('AI mode requires Hugging Face token!')
       return
     }
     localStorage.setItem('hf_token', huggingFaceToken)
@@ -404,20 +419,37 @@ async function generateAIHandoff(e) {
   try {
     showLoading('Generating AI-powered handoff...')
     
-    // Note: In production, you'd call the AI endpoint
-    // For now, show a formatted version
-    const handoff = formatHandoff(context, projectId)
-    
-    document.getElementById('handoff-output').textContent = handoff
-    document.getElementById('handoff-result').classList.remove('hidden')
-    
-    hideLoading()
-    showSuccess('Handoff generated successfully!')
+    if (useAI && huggingFaceToken) {
+      // Real AI endpoint call
+      const response = await axios.post(`${API_BASE}/ai/handoff`, {
+        projectId,
+        conversationText: context,
+        useAI: true,
+        huggingFaceToken
+      })
+      
+      hideLoading()
+      
+      if (response.data.success) {
+        document.getElementById('handoff-output').textContent = response.data.data.masterPrompt
+        document.getElementById('handoff-result').classList.remove('hidden')
+        showSuccess('AI handoff generated successfully!')
+      } else {
+        throw new Error(response.data.message || 'AI generation failed')
+      }
+    } else {
+      // Fallback to formatted version
+      const handoff = formatHandoff(context, projectId)
+      document.getElementById('handoff-output').textContent = handoff
+      document.getElementById('handoff-result').classList.remove('hidden')
+      hideLoading()
+      showSuccess('Handoff generated successfully!')
+    }
     
   } catch (error) {
     console.error('Generate handoff error:', error)
     hideLoading()
-    showError('Failed to generate handoff')
+    showError('Failed to generate handoff: ' + error.message)
   }
 }
 
@@ -495,20 +527,217 @@ function escapeHtml(text) {
   return div.innerHTML
 }
 
+// ============================================================================
+// TOAST NOTIFICATION SYSTEM
+// ============================================================================
+
+function showToast(message, type = 'info') {
+  const toast = document.createElement('div')
+  toast.style.cssText = 'transform: translateX(400px); opacity: 0;'
+  toast.className = `fixed top-4 right-4 px-6 py-4 rounded-lg shadow-2xl transition-all duration-300 ease-in-out z-50 ${\n    type === 'success' ? 'bg-green-500 text-white' :
+    type === 'error' ? 'bg-red-500 text-white' :
+    type === 'warning' ? 'bg-yellow-500 text-white' :
+    'bg-blue-500 text-white'
+  }`
+  
+  const icon = {
+    success: '✅',
+    error: '❌',
+    warning: '⚠️',
+    info: 'ℹ️'
+  }[type]
+  
+  toast.innerHTML = `
+    <div class="flex items-center gap-3">
+      <span class="text-2xl">${icon}</span>
+      <span class="font-semibold">${message}</span>
+    </div>
+  `
+  
+  document.body.appendChild(toast)
+  
+  // Animate in
+  setTimeout(() => {
+    toast.style.transform = 'translateX(0)'
+    toast.style.opacity = '1'
+  }, 10)
+  
+  // Auto dismiss after 3 seconds
+  setTimeout(() => {
+    toast.style.transform = 'translateX(400px)'
+    toast.style.opacity = '0'
+    setTimeout(() => toast.remove(), 300)
+  }, 3000)
+}
+
 function showSuccess(message) {
-  alert(`✅ ${message}`)
+  showToast(message, 'success')
 }
 
 function showError(message) {
-  alert(`❌ ${message}`)
+  showToast(message, 'error')
 }
 
-function showLoading(message) {
-  console.log(`⏳ ${message}`)
+function showWarning(message) {
+  showToast(message, 'warning')
+}
+
+function showInfo(message) {
+  showToast(message, 'info')
+}
+
+// ============================================================================
+// LOADING SPINNER SYSTEM
+// ============================================================================
+
+let loadingOverlay = null
+
+function showLoading(message = 'Processing...') {
+  if (loadingOverlay) return
+  
+  loadingOverlay = document.createElement('div')
+  loadingOverlay.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50'
+  loadingOverlay.innerHTML = `
+    <div class="bg-white rounded-2xl p-8 shadow-2xl flex flex-col items-center gap-4">
+      <div class="w-16 h-16 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin"></div>
+      <p class="text-lg font-semibold text-gray-800">${message}</p>
+    </div>
+  `
+  document.body.appendChild(loadingOverlay)
+  document.body.style.overflow = 'hidden'
 }
 
 function hideLoading() {
-  console.log('✅ Done')
+  if (loadingOverlay) {
+    loadingOverlay.remove()
+    loadingOverlay = null
+    document.body.style.overflow = ''
+  }
+}
+
+// ============================================================================
+// MODAL DIALOG SYSTEM
+// ============================================================================
+
+function showModal(options) {
+  return new Promise((resolve) => {
+    const modal = document.createElement('div')
+    modal.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4'
+    
+    const content = `
+      <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full transform transition-all">
+        <div class="bg-gradient-to-r from-purple-600 to-blue-600 text-white p-6 rounded-t-2xl">
+          <h3 class="text-xl font-bold">${options.title || 'Input Required'}</h3>
+        </div>
+        <div class="p-6">
+          ${options.message ? `<p class="text-gray-600 mb-4">${options.message}</p>` : ''}
+          ${options.input ? `
+            <input type="text" 
+                   id="modal-input" 
+                   placeholder="${options.placeholder || ''}" 
+                   value="${options.defaultValue || ''}" 
+                   class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none mb-4"
+            />
+          ` : ''}
+          ${options.textarea ? `
+            <textarea id="modal-textarea" 
+                      placeholder="${options.placeholder || ''}" 
+                      rows="4"
+                      class="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-purple-500 focus:outline-none mb-4"
+            >${options.defaultValue || ''}</textarea>
+          ` : ''}
+          <div class="flex gap-3 justify-end">
+            ${options.showCancel !== false ? `
+              <button id="modal-cancel" class="px-6 py-2 rounded-lg border-2 border-gray-300 text-gray-700 font-semibold hover:bg-gray-50 transition-colors">
+                Cancel
+              </button>
+            ` : ''}
+            <button id="modal-confirm" class="px-6 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold hover:opacity-90 transition-opacity">
+              ${options.confirmText || 'Confirm'}
+            </button>
+          </div>
+        </div>
+      </div>
+    `
+    
+    modal.innerHTML = content
+    document.body.appendChild(modal)
+    document.body.style.overflow = 'hidden'
+    
+    const input = modal.querySelector('#modal-input')
+    const textarea = modal.querySelector('#modal-textarea')
+    const confirmBtn = modal.querySelector('#modal-confirm')
+    const cancelBtn = modal.querySelector('#modal-cancel')
+    
+    // Focus input if exists
+    if (input) input.focus()
+    if (textarea) textarea.focus()
+    
+    // Handle confirm
+    confirmBtn.onclick = () => {
+      const value = input?.value || textarea?.value || true
+      modal.remove()
+      document.body.style.overflow = ''
+      resolve(value)
+    }
+    
+    // Handle cancel
+    if (cancelBtn) {
+      cancelBtn.onclick = () => {
+        modal.remove()
+        document.body.style.overflow = ''
+        resolve(null)
+      }
+    }
+    
+    // Handle escape key
+    modal.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        modal.remove()
+        document.body.style.overflow = ''
+        resolve(null)
+      }
+      if (e.key === 'Enter' && input) {
+        confirmBtn.click()
+      }
+    })
+    
+    // Handle backdrop click
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.remove()
+        document.body.style.overflow = ''
+        resolve(null)
+      }
+    })
+  })
+}
+
+function confirmDialog(title, message) {
+  return showModal({
+    title,
+    message,
+    showCancel: true,
+    confirmText: 'Confirm'
+  })
+}
+
+function promptDialog(title, placeholder = '', defaultValue = '') {
+  return showModal({
+    title,
+    input: true,
+    placeholder,
+    defaultValue
+  })
+}
+
+function promptTextarea(title, placeholder = '', defaultValue = '') {
+  return showModal({
+    title,
+    textarea: true,
+    placeholder,
+    defaultValue
+  })
 }
 
 function initializeApp() {
