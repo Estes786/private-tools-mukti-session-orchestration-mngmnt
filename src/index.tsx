@@ -365,6 +365,40 @@ app.post('/api/sessions/create', async (c) => {
   })
 })
 
+// Get single session details
+app.get('/api/sessions/:id', async (c) => {
+  const { env } = c
+  const sessionId = c.req.param('id')
+  
+  const session = await env.DB.prepare(`
+    SELECT s.*, p.name as project_name, p.description as project_description
+    FROM sessions s
+    JOIN projects p ON s.project_id = p.id
+    WHERE s.id = ?
+  `).bind(sessionId).first() as any
+  
+  if (!session) {
+    return c.json({ success: false, message: 'Session not found' }, 404)
+  }
+  
+  // Get handoff document
+  const handoff = await env.DB.prepare(`
+    SELECT content FROM handoff_documents 
+    WHERE session_id = ? 
+    ORDER BY created_at DESC 
+    LIMIT 1
+  `).bind(sessionId).first() as any
+  
+  if (handoff) {
+    session.handoff_content = handoff.content
+  }
+  
+  return c.json({
+    success: true,
+    data: session
+  })
+})
+
 // Complete session & auto-generate handoff
 app.post('/api/sessions/:session_id/complete', async (c) => {
   const { env } = c

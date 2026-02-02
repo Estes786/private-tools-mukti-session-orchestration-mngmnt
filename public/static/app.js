@@ -325,6 +325,23 @@ function renderSessions(sessions, projectId) {
           <span class="font-bold text-green-600 ml-1">${session.handoff_count || 0}</span>
         </div>
       </div>
+      
+      ${session.status === 'in_progress' ? `
+        <div class="mt-4 flex gap-3">
+          <button 
+            onclick="completeSession('${session.id}', '${projectId}')" 
+            class="flex-1 bg-gradient-to-r from-green-600 to-emerald-600 text-white px-4 py-2 rounded-lg font-semibold hover:shadow-lg transition-shadow"
+          >
+            <i class="fas fa-check-circle mr-2"></i>Complete Session
+          </button>
+          <button 
+            onclick="viewHandoff('${session.id}')" 
+            class="px-4 py-2 bg-purple-100 text-purple-700 rounded-lg font-semibold hover:bg-purple-200 transition-colors"
+          >
+            <i class="fas fa-file-alt mr-2"></i>View Handoff
+          </button>
+        </div>
+      ` : ''}
     </div>
   `).join('')
 }
@@ -362,12 +379,109 @@ async function createNewSession() {
       if (response.data.data.previous_handoff) {
         showInfo('Previous handoff loaded! Check console for details.')
         console.log('Previous Handoff:', response.data.data.previous_handoff)
+        
+        // Auto-display previous handoff in modal
+        await showModal('📝 Previous Session Handoff', response.data.data.previous_handoff, 'textarea', true)
       }
     }
   } catch (error) {
     console.error('Create session error:', error)
     hideLoading()
     showError('Failed to create session')
+  }
+}
+
+// Complete session workflow with AI handoff generation
+async function completeSession(sessionId, projectId) {
+  try {
+    // Prompt for accomplishments
+    const accomplishments = await promptTextarea(
+      'Session Accomplishments',
+      'What did you accomplish in this session?\n\nBe specific and detailed:'
+    )
+    
+    if (!accomplishments) {
+      showWarning('Please provide accomplishments')
+      return
+    }
+    
+    // Prompt for blockers (optional)
+    const blockers = await promptTextarea(
+      'Blockers or Issues (Optional)',
+      'Any blockers or issues encountered?'
+    )
+    
+    // Prompt for credits used
+    const creditsStr = await promptDialog(
+      'Credits Used',
+      'Enter credits used in this session:',
+      '90'
+    )
+    
+    const creditsUsed = parseInt(creditsStr) || 90
+    
+    showLoading('Completing session & generating handoff...')
+    
+    // Complete session
+    const response = await axios.post(`${API_BASE}/sessions/${sessionId}/complete`, {
+      accomplishments: accomplishments,
+      blockers: blockers || '',
+      credits_used: creditsUsed
+    })
+    
+    hideLoading()
+    
+    if (response.data.success) {
+      showSuccess('Session completed successfully! Handoff generated.')
+      
+      // Show handoff in modal if available
+      if (response.data.data.handoff_content) {
+        await showModal(
+          '📝 Handoff Document Generated',
+          response.data.data.handoff_content,
+          'textarea',
+          true
+        )
+      }
+      
+      // Reload sessions
+      loadSessions(projectId)
+      loadStats()
+    }
+  } catch (error) {
+    console.error('Complete session error:', error)
+    hideLoading()
+    showError('Failed to complete session: ' + (error.response?.data?.message || error.message))
+  }
+}
+
+// View handoff document for a session
+async function viewHandoff(sessionId) {
+  try {
+    showLoading('Loading handoff document...')
+    
+    const response = await axios.get(`${API_BASE}/sessions/${sessionId}`)
+    
+    hideLoading()
+    
+    if (response.data.success) {
+      const session = response.data.data
+      
+      if (session.handoff_content) {
+        await showModal(
+          `📝 Session #${session.session_number} Handoff`,
+          session.handoff_content,
+          'textarea',
+          true
+        )
+      } else {
+        showWarning('No handoff document available for this session')
+      }
+    }
+  } catch (error) {
+    console.error('View handoff error:', error)
+    hideLoading()
+    showError('Failed to load handoff document')
   }
 }
 
