@@ -358,7 +358,7 @@ app.post('/api/sessions/create', async (c) => {
       session_id: sessionId,
       session_number: sessionNumber,
       previous_handoff: previousHandoff,
-      message: previous Handoff 
+      message: previousHandoff 
         ? `✨ Session #${sessionNumber} created! Previous handoff loaded.`
         : `🎯 Session #${sessionNumber} created (First session)`
     }
