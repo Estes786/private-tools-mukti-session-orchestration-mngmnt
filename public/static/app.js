@@ -508,13 +508,472 @@ async function loadAnalytics() {
   const container = document.getElementById('analytics-content')
   if (!container) return
   
-  container.innerHTML = `
-    <div class="text-center py-12 text-gray-500">
-      <div class="text-6xl mb-4">📊</div>
-      <p class="text-lg">Analytics coming soon!</p>
-      <p class="text-sm mt-2">Track growth efficiency, session patterns, and more</p>
-    </div>
-  `
+  try {
+    // Get sessions data
+    const response = await axios.get(`${API_BASE}/projects`)
+    if (!response.data.success || response.data.data.length === 0) {
+      container.innerHTML = `
+        <div class="text-center py-12 text-gray-500">
+          <div class="text-6xl mb-4">📊</div>
+          <p class="text-lg">No analytics data yet!</p>
+          <p class="text-sm mt-2">Create a project and start sessions to see growth metrics</p>
+        </div>
+      `
+      return
+    }
+    
+    // Calculate analytics for all sessions
+    let allSessions = []
+    for (const project of response.data.data) {
+      const sessionsResp = await axios.get(`${API_BASE}/projects/${project.id}/sessions`)
+      if (sessionsResp.data.success) {
+        allSessions = allSessions.concat(sessionsResp.data.data.map(s => ({...s, projectName: project.name})))
+      }
+    }
+    
+    // Sort by created_at
+    allSessions.sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    
+    // Calculate metrics
+    const sessionCount = allSessions.length
+    const currentEfficiency = calculateEfficiency(sessionCount)
+    const currentKnowledge = calculateKnowledge(sessionCount)
+    const sessionsTo95 = calculateSessionsToTarget(0.95)
+    
+    // Update stats
+    document.getElementById('analytics-total-sessions').textContent = sessionCount
+    document.getElementById('analytics-efficiency').textContent = `${(currentEfficiency * 100).toFixed(1)}%`
+    
+    // Calculate growth rate
+    const growthRate = sessionCount > 1 
+      ? ((calculateEfficiency(sessionCount) - calculateEfficiency(sessionCount - 1)) / calculateEfficiency(sessionCount - 1) * 100)
+      : 0
+    document.getElementById('analytics-growth').textContent = `+${growthRate.toFixed(1)}%`
+    
+    // Render charts
+    container.innerHTML = `
+      <div class="space-y-8">
+        <!-- Predictions Card -->
+        <div class="bg-gradient-to-r from-purple-50 to-blue-50 border-2 border-purple-200 rounded-xl p-6">
+          <h4 class="text-xl font-bold text-purple-900 mb-4">🔮 Growth Predictions</h4>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div class="bg-white rounded-lg p-4 shadow">
+              <p class="text-sm text-gray-600 mb-1">Current Efficiency</p>
+              <p class="text-3xl font-bold text-purple-600">${(currentEfficiency * 100).toFixed(1)}%</p>
+            </div>
+            <div class="bg-white rounded-lg p-4 shadow">
+              <p class="text-sm text-gray-600 mb-1">Current Knowledge</p>
+              <p class="text-3xl font-bold text-blue-600">${currentKnowledge.toFixed(2)}x</p>
+            </div>
+            <div class="bg-white rounded-lg p-4 shadow">
+              <p class="text-sm text-gray-600 mb-1">Sessions to 95%</p>
+              <p class="text-3xl font-bold text-green-600">${sessionsTo95 - sessionCount}</p>
+              <p class="text-xs text-gray-500 mt-1">~${Math.ceil((sessionsTo95 - sessionCount) / 2)} weeks at 2/week</p>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Efficiency Growth Chart -->
+        <div class="bg-white rounded-xl border-2 border-gray-200 p-6">
+          <h4 class="text-xl font-bold text-gray-800 mb-4">📈 Efficiency Growth Over Time</h4>
+          <canvas id="efficiencyChart" height="80"></canvas>
+        </div>
+        
+        <!-- Knowledge Accumulation Chart -->
+        <div class="bg-white rounded-xl border-2 border-gray-200 p-6">
+          <h4 class="text-xl font-bold text-gray-800 mb-4">🧠 Knowledge Accumulation</h4>
+          <canvas id="knowledgeChart" height="80"></canvas>
+        </div>
+        
+        <!-- Effective Output Chart -->
+        <div class="bg-white rounded-xl border-2 border-gray-200 p-6">
+          <h4 class="text-xl font-bold text-gray-800 mb-4">💎 Effective Output (Credits × Efficiency × Knowledge)</h4>
+          <canvas id="outputChart" height="80"></canvas>
+        </div>
+        
+        <!-- Session Timeline -->
+        <div class="bg-white rounded-xl border-2 border-gray-200 p-6">
+          <h4 class="text-xl font-bold text-gray-800 mb-4">🕐 Session Timeline</h4>
+          <div id="session-timeline-viz" class="space-y-3"></div>
+        </div>
+      </div>
+    `
+    
+    // Render charts
+    renderEfficiencyChart(sessionCount)
+    renderKnowledgeChart(sessionCount)
+    renderOutputChart(sessionCount)
+    renderSessionTimeline(allSessions)
+    
+  } catch (error) {
+    console.error('Load analytics error:', error)
+    container.innerHTML = `
+      <div class="text-center py-12 text-red-500">
+        <div class="text-6xl mb-4">❌</div>
+        <p class="text-lg">Failed to load analytics</p>
+        <p class="text-sm mt-2">${error.message}</p>
+      </div>
+    `
+  }
+}
+
+// ============================================================================
+// GROWTH METRICS CALCULATIONS (Infinite Growth Loop Formulas)
+// ============================================================================
+
+function calculateEfficiency(sessionNumber) {
+  // Formula: 0.7 + 0.25 × tanh(N / 50)
+  // Starts at 70%, asymptotically approaches 95%
+  return 0.7 + 0.25 * Math.tanh(sessionNumber / 50)
+}
+
+function calculateKnowledge(sessionNumber) {
+  // Formula: 1 + log(1 + N / 10)
+  // Logarithmic growth representing accumulated learning
+  return 1 + Math.log(1 + sessionNumber / 10)
+}
+
+function calculateOutput(credits, sessionNumber) {
+  // Effective output = Credits × Efficiency × Knowledge
+  const efficiency = calculateEfficiency(sessionNumber)
+  const knowledge = calculateKnowledge(sessionNumber)
+  return credits * efficiency * knowledge
+}
+
+function calculateSessionsToTarget(targetEfficiency) {
+  // Solve for N: targetEfficiency = 0.7 + 0.25 × tanh(N / 50)
+  // N = 50 × atanh((targetEfficiency - 0.7) / 0.25)
+  return Math.ceil(50 * Math.atanh((targetEfficiency - 0.7) / 0.25))
+}
+
+// ============================================================================
+// CHART RENDERING
+// ============================================================================
+
+function renderEfficiencyChart(currentSession) {
+  const canvas = document.getElementById('efficiencyChart')
+  if (!canvas) return
+  
+  // Generate data points (past + future predictions)
+  const maxSessions = Math.max(currentSession + 20, 50)
+  const labels = []
+  const actualData = []
+  const predictedData = []
+  
+  for (let i = 1; i <= maxSessions; i++) {
+    labels.push(`S${i}`)
+    const efficiency = calculateEfficiency(i) * 100
+    
+    if (i <= currentSession) {
+      actualData.push(efficiency)
+      predictedData.push(null)
+    } else {
+      actualData.push(null)
+      predictedData.push(efficiency)
+    }
+  }
+  
+  new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'Actual Efficiency',
+          data: actualData,
+          borderColor: 'rgb(147, 51, 234)',
+          backgroundColor: 'rgba(147, 51, 234, 0.1)',
+          borderWidth: 3,
+          tension: 0.4,
+          pointRadius: 4,
+          pointHoverRadius: 6
+        },
+        {
+          label: 'Predicted Efficiency',
+          data: predictedData,
+          borderColor: 'rgb(59, 130, 246)',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          borderWidth: 2,
+          borderDash: [5, 5],
+          tension: 0.4,
+          pointRadius: 0
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: {
+          display: true,
+          position: 'top'
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              return `${context.dataset.label}: ${context.parsed.y.toFixed(1)}%`
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: false,
+          min: 65,
+          max: 100,
+          ticks: {
+            callback: function(value) {
+              return value + '%'
+            }
+          }
+        },
+        x: {
+          ticks: {
+            maxTicksLimit: 20
+          }
+        }
+      }
+    }
+  })
+}
+
+function renderKnowledgeChart(currentSession) {
+  const canvas = document.getElementById('knowledgeChart')
+  if (!canvas) return
+  
+  const maxSessions = Math.max(currentSession + 20, 50)
+  const labels = []
+  const actualData = []
+  const predictedData = []
+  
+  for (let i = 1; i <= maxSessions; i++) {
+    labels.push(`S${i}`)
+    const knowledge = calculateKnowledge(i)
+    
+    if (i <= currentSession) {
+      actualData.push(knowledge)
+      predictedData.push(null)
+    } else {
+      actualData.push(null)
+      predictedData.push(knowledge)
+    }
+  }
+  
+  new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'Actual Knowledge',
+          data: actualData,
+          borderColor: 'rgb(59, 130, 246)',
+          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+          borderWidth: 3,
+          tension: 0.4,
+          pointRadius: 4,
+          pointHoverRadius: 6
+        },
+        {
+          label: 'Predicted Knowledge',
+          data: predictedData,
+          borderColor: 'rgb(34, 197, 94)',
+          backgroundColor: 'rgba(34, 197, 94, 0.1)',
+          borderWidth: 2,
+          borderDash: [5, 5],
+          tension: 0.4,
+          pointRadius: 0
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: {
+          display: true,
+          position: 'top'
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              return `${context.dataset.label}: ${context.parsed.y.toFixed(2)}x`
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: false,
+          min: 1,
+          ticks: {
+            callback: function(value) {
+              return value.toFixed(1) + 'x'
+            }
+          }
+        },
+        x: {
+          ticks: {
+            maxTicksLimit: 20
+          }
+        }
+      }
+    }
+  })
+}
+
+function renderOutputChart(currentSession) {
+  const canvas = document.getElementById('outputChart')
+  if (!canvas) return
+  
+  const maxSessions = Math.max(currentSession + 20, 50)
+  const labels = []
+  const actualData = []
+  const predictedData = []
+  const credits = 90 // Standard session budget
+  
+  for (let i = 1; i <= maxSessions; i++) {
+    labels.push(`S${i}`)
+    const output = calculateOutput(credits, i)
+    
+    if (i <= currentSession) {
+      actualData.push(output)
+      predictedData.push(null)
+    } else {
+      actualData.push(null)
+      predictedData.push(output)
+    }
+  }
+  
+  new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [
+        {
+          label: 'Actual Output',
+          data: actualData,
+          borderColor: 'rgb(34, 197, 94)',
+          backgroundColor: 'rgba(34, 197, 94, 0.1)',
+          borderWidth: 3,
+          tension: 0.4,
+          pointRadius: 4,
+          pointHoverRadius: 6,
+          fill: true
+        },
+        {
+          label: 'Predicted Output',
+          data: predictedData,
+          borderColor: 'rgb(251, 191, 36)',
+          backgroundColor: 'rgba(251, 191, 36, 0.1)',
+          borderWidth: 2,
+          borderDash: [5, 5],
+          tension: 0.4,
+          pointRadius: 0,
+          fill: true
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: {
+          display: true,
+          position: 'top'
+        },
+        tooltip: {
+          callbacks: {
+            label: function(context) {
+              return `${context.dataset.label}: ${context.parsed.y.toFixed(1)} effective credits`
+            }
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: false,
+          min: 60,
+          ticks: {
+            callback: function(value) {
+              return value.toFixed(0) + ' credits'
+            }
+          }
+        },
+        x: {
+          ticks: {
+            maxTicksLimit: 20
+          }
+        }
+      }
+    }
+  })
+}
+
+function renderSessionTimeline(sessions) {
+  const container = document.getElementById('session-timeline-viz')
+  if (!container) return
+  
+  if (sessions.length === 0) {
+    container.innerHTML = '<p class="text-center text-gray-500">No sessions yet</p>'
+    return
+  }
+  
+  const timelineHTML = sessions.map((session, index) => {
+    const sessionNum = index + 1
+    const efficiency = (calculateEfficiency(sessionNum) * 100).toFixed(1)
+    const knowledge = calculateKnowledge(sessionNum).toFixed(2)
+    const output = calculateOutput(90, sessionNum).toFixed(1)
+    
+    const statusColor = {
+      'active': 'border-blue-500 bg-blue-50',
+      'completed': 'border-green-500 bg-green-50',
+      'failed': 'border-red-500 bg-red-50'
+    }[session.status] || 'border-gray-500 bg-gray-50'
+    
+    const statusIcon = {
+      'active': '🔄',
+      'completed': '✅',
+      'failed': '❌'
+    }[session.status] || '⏸️'
+    
+    return `
+      <div class="relative pl-8 border-l-4 ${statusColor} p-4 rounded-r-lg hover:shadow-lg transition-shadow">
+        <div class="absolute left-0 -ml-3 w-6 h-6 rounded-full ${statusColor.replace('bg-', 'bg-')} border-4 border-white flex items-center justify-center">
+          <span class="text-xs">${statusIcon}</span>
+        </div>
+        <div class="flex justify-between items-start">
+          <div>
+            <h5 class="font-bold text-lg text-gray-800">Session #${sessionNum}</h5>
+            <p class="text-sm text-gray-600 mb-2">${session.projectName || 'Unknown Project'}</p>
+            <p class="text-xs text-gray-500">${new Date(session.created_at).toLocaleDateString('en-US', { 
+              year: 'numeric', 
+              month: 'short', 
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            })}</p>
+          </div>
+          <div class="flex gap-3">
+            <div class="text-center">
+              <p class="text-xs text-gray-500">Efficiency</p>
+              <p class="text-lg font-bold text-purple-600">${efficiency}%</p>
+            </div>
+            <div class="text-center">
+              <p class="text-xs text-gray-500">Knowledge</p>
+              <p class="text-lg font-bold text-blue-600">${knowledge}x</p>
+            </div>
+            <div class="text-center">
+              <p class="text-xs text-gray-500">Output</p>
+              <p class="text-lg font-bold text-green-600">${output}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    `
+  }).join('')
+  
+  container.innerHTML = timelineHTML
 }
 
 // ============================================================================
