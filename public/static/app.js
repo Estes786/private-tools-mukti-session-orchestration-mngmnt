@@ -618,11 +618,38 @@ function downloadHandoff() {
 // ANALYTICS
 // ============================================================================
 
+// Helper function to wait for Chart.js to be available
+async function waitForChartJS(maxWaitMs = 5000) {
+  const startTime = Date.now()
+  while (typeof Chart === 'undefined') {
+    if (Date.now() - startTime > maxWaitMs) {
+      throw new Error('Chart.js failed to load')
+    }
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  return true
+}
+
 async function loadAnalytics() {
   const container = document.getElementById('analytics-content')
   if (!container) return
   
   try {
+    // Wait for Chart.js to be available
+    try {
+      await waitForChartJS()
+    } catch (error) {
+      console.error('Chart.js not available:', error)
+      container.innerHTML = `
+        <div class="text-center py-12 text-yellow-500">
+          <div class="text-6xl mb-4">⚠️</div>
+          <p class="text-lg">Chart library is loading...</p>
+          <p class="text-sm mt-2">Please refresh the page if this persists</p>
+        </div>
+      `
+      return
+    }
+    
     // Get sessions data
     const response = await axios.get(`${API_BASE}/projects`)
     if (!response.data.success || response.data.data.length === 0) {
@@ -768,6 +795,12 @@ function renderEfficiencyChart(currentSession) {
   const canvas = document.getElementById('efficiencyChart')
   if (!canvas) return
   
+  // Safety check: Ensure Chart.js is loaded
+  if (typeof Chart === 'undefined') {
+    console.error('Chart.js is not loaded yet')
+    return
+  }
+  
   // Generate data points (past + future predictions)
   const maxSessions = Math.max(currentSession + 20, 50)
   const labels = []
@@ -855,6 +888,12 @@ function renderKnowledgeChart(currentSession) {
   const canvas = document.getElementById('knowledgeChart')
   if (!canvas) return
   
+  // Safety check: Ensure Chart.js is loaded
+  if (typeof Chart === 'undefined') {
+    console.error('Chart.js is not loaded yet')
+    return
+  }
+  
   const maxSessions = Math.max(currentSession + 20, 50)
   const labels = []
   const actualData = []
@@ -939,6 +978,12 @@ function renderKnowledgeChart(currentSession) {
 function renderOutputChart(currentSession) {
   const canvas = document.getElementById('outputChart')
   if (!canvas) return
+  
+  // Safety check: Ensure Chart.js is loaded
+  if (typeof Chart === 'undefined') {
+    console.error('Chart.js is not loaded yet')
+    return
+  }
   
   const maxSessions = Math.max(currentSession + 20, 50)
   const labels = []
